@@ -36,7 +36,7 @@ module.exports = function override(config, env) {
   config.output = {
     ...config.output,
     path: path.resolve(__dirname, 'build'),
-    publicPath: './',
+    publicPath: '/',
     filename: 'static/js/[name].js',
     chunkFilename: 'static/js/[name].chunk.js'
   };
@@ -44,7 +44,7 @@ module.exports = function override(config, env) {
   // Development specific settings
   if (env === 'development') {
     config.devServer = {
-      port: 5173,
+      port: 3001,
       host: 'localhost',
       hot: true,
       historyApiFallback: true,

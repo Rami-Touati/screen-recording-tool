@@ -1,52 +1,58 @@
 import React from 'react';
-import ReactDOM from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
-import CssBaseline from '@mui/material/CssBaseline';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
 import App from './components/App';
-import ErrorBoundary from './components/ErrorBoundary';
-import './styles/index.css';
+import './index.css'; // Add global styles
 
-console.log('🚀 Starting application...');
-console.log('Current location:', window.location.href);
+// Add global error handler
+window.onerror = (message, source, lineno, colno, error) => {
+  console.error('Global error:', { message, source, lineno, colno, error });
+  return false;
+};
 
-const theme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: '#2196f3',
-    },
-    secondary: {
-      main: '#f50057',
-    },
-    background: {
-      default: '#121212',
-      paper: '#1e1e1e',
-    },
-  },
+// Add unhandled rejection handler
+window.onunhandledrejection = (event) => {
+  console.error('Unhandled promise rejection:', event.reason);
+};
+
+// Log initial load
+console.log('🚀 Application starting...', {
+  url: window.location.href,
+  readyState: document.readyState,
+  time: new Date().toISOString()
 });
 
+// Get root element
 const rootElement = document.getElementById('root');
-console.log('📦 Root element found:', rootElement);
+console.log('Root element found:', rootElement);
 
 if (!rootElement) {
-  throw new Error('Failed to find the root element');
+  throw new Error('Root element not found! Check if index.html has <div id="root"></div>');
 }
 
-const root = ReactDOM.createRoot(rootElement);
-console.log('🌳 Created React root');
-
-root.render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <HashRouter>
-          <App />
-        </HashRouter>
-      </ThemeProvider>
-    </ErrorBoundary>
-  </React.StrictMode>
-);
-
-console.log('🎭 Rendered app to root'); 
+// Create root and render
+try {
+  console.log('Creating React root...');
+  const root = createRoot(rootElement);
+  
+  console.log('Rendering application...');
+  root.render(
+    <React.StrictMode>
+      <HashRouter>
+        <App />
+      </HashRouter>
+    </React.StrictMode>
+  );
+  
+  console.log('✅ Render complete');
+} catch (error) {
+  console.error('❌ Render failed:', error);
+  
+  // Show error in DOM
+  rootElement.innerHTML = `
+    <div style="padding: 20px; background: #ff0000; color: white; font-family: Arial;">
+      <h1>Failed to start application</h1>
+      <pre>${error instanceof Error ? error.message : String(error)}</pre>
+    </div>
+  `;
+} 

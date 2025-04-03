@@ -1,37 +1,37 @@
-import * as ffmpeg from 'ffmpeg-static';
-import * as Whammy from 'whammy';
-import { spawn } from 'child_process';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 interface VideoProcessingOptions {
-  fps?: number;
-  quality?: 'high' | 'medium' | 'low';
-  loop?: boolean;
-  width?: number;
-  height?: number;
-  bitrate?: number;
-  format?: 'mp4' | 'gif' | 'webm';
-}
-
-interface VideoEffect {
-  type: 'blur' | 'brightness' | 'contrast' | 'saturation' | 'hue' | 'grayscale' | 'sepia' | 'invert';
-  value: number;
+  fps: number;
+  bitrate: string;
+  resolution: {
+    width: number;
+    height: number;
+  };
+  zoomRegions: Array<{
+    startTime: number;
+    endTime: number;
+    scale: number;
+  }>;
+  cropSettings?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
+  textOverlays: Array<{
+    text: string;
+    position: { x: number; y: number };
+    startTime: number;
+    endTime: number;
+  }>;
 }
 
 class VideoProcessor {
   private static instance: VideoProcessor;
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
-  private effects: VideoEffect[] = [];
-  private isProcessing: boolean = false;
+  private ffmpegInstance: FFmpeg | null = null;
 
-  private constructor() {
-    this.canvas = document.createElement('canvas');
-    const context = this.canvas.getContext('2d');
-    if (!context) {
-      throw new Error('Could not get canvas context');
-    }
-    this.ctx = context;
-  }
+  private constructor() {}
 
   static getInstance(): VideoProcessor {
     if (!VideoProcessor.instance) {
@@ -40,240 +40,267 @@ class VideoProcessor {
     return VideoProcessor.instance;
   }
 
-  // Video processing methods
-  async processVideo(
-    inputStream: MediaStream,
-    outputStream: MediaStream,
-    options: VideoProcessingOptions = {}
-  ): Promise<void> {
-    const {
-      fps = 30,
-      quality = 'high',
-      width = 1920,
-      height = 1080,
-      bitrate = 5000000, // 5 Mbps
-    } = options;
+  private async init(): Promise<FFmpeg> {
+    if (this.ffmpegInstance) return this.ffmpegInstance;
 
-    this.canvas.width = width;
-    this.canvas.height = height;
-
-    const videoTrack = inputStream.getVideoTracks()[0];
-    const videoElement = document.createElement('video');
-    videoElement.srcObject = inputStream;
-    await videoElement.play();
-
-    const mediaRecorder = new MediaRecorder(outputStream, {
-      mimeType: 'video/webm;codecs=vp9',
-      videoBitsPerSecond: bitrate,
+    const ffmpeg = new FFmpeg();
+    await ffmpeg.load({
+      coreURL: await toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.2/dist/umd/ffmpeg-core.js', 'text/javascript'),
+      wasmURL: await toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.2/dist/umd/ffmpeg-core.wasm', 'application/wasm'),
+      workerURL: await toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.2/dist/umd/ffmpeg-core.worker.js', 'text/javascript')
     });
 
-    const chunks: BlobPart[] = [];
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        chunks.push(event.data);
+    this.ffmpegInstance = ffmpeg;
+    return ffmpeg;
+  }
+
+  async processVideo(
+    videoBlob: Blob,
+    options: VideoProcessingOptions,
+    onProgress?: (progress: number) => void
+  ): Promise<Blob> {
+    const ff = await this.init();
+    
+    try {
+      // Write input file
+      await ff.writeFile('input.webm', await fetchFile(videoBlob));
+      
+      let currentFilter = '';
+      let inputLabel = '[0:v]';
+      let outputLabel = '[v0]';
+      
+      // Apply crop if specified
+      if (options.cropSettings) {
+        currentFilter += `${inputLabel}crop=${options.cropSettings.width}:${options.cropSettings.height}:${options.cropSettings.x}:${options.cropSettings.y}${outputLabel};`;
+        inputLabel = outputLabel;
+        outputLabel = '[v1]';
       }
-    };
-
-    mediaRecorder.start();
-    this.isProcessing = true;
-
-    const processFrame = async () => {
-      if (!this.isProcessing) return;
-
-      this.ctx.drawImage(videoElement, 0, 0, width, height);
-      this.applyEffects();
-
-      const frame = this.canvas.captureStream(fps).getVideoTracks()[0];
-      outputStream.addTrack(frame);
-
-      requestAnimationFrame(processFrame);
-    };
-
-    processFrame();
-  }
-
-  // Effect management methods
-  addEffect(effect: VideoEffect): void {
-    this.effects.push(effect);
-  }
-
-  removeEffect(type: VideoEffect['type']): void {
-    this.effects = this.effects.filter(effect => effect.type !== type);
-  }
-
-  updateEffect(type: VideoEffect['type'], value: number): void {
-    const effect = this.effects.find(e => e.type === type);
-    if (effect) {
-      effect.value = value;
+      
+      // Apply zoom regions if any
+      if (options.zoomRegions.length > 0) {
+        const sortedRegions = [...options.zoomRegions].sort((a, b) => a.startTime - b.startTime);
+        
+        sortedRegions.forEach((region, index) => {
+          const zoomFactor = 1 / region.scale;
+          const offset = (1 - zoomFactor) / 2;
+          
+          currentFilter += `${inputLabel}crop=iw*${zoomFactor}:ih*${zoomFactor}:iw*${offset}:ih*${offset},scale=${options.resolution.width}:${options.resolution.height}[v${index + 2}];`;
+          inputLabel = `[v${index + 2}]`;
+          outputLabel = `[v${index + 3}]`;
+        });
+      }
+      
+      // Add text overlays if any
+      options.textOverlays.forEach((overlay, index) => {
+        currentFilter += `${inputLabel}drawtext=text='${overlay.text}':x=${overlay.position.x}:y=${overlay.position.y}:enable='between(t,${overlay.startTime},${overlay.endTime})':fontsize=24:fontcolor=white${outputLabel};`;
+        inputLabel = outputLabel;
+        outputLabel = `[v${index + 4}]`;
+      });
+      
+      // Remove last semicolon
+      currentFilter = currentFilter.slice(0, -1);
+      
+      // Prepare FFmpeg command with high quality settings
+      const command = [
+        '-i', 'input.webm',
+        '-filter_complex', currentFilter,
+        '-c:v', 'libx264',
+        '-preset', 'slow', // Better compression
+        '-crf', '18', // High quality (lower is better)
+        '-b:v', options.bitrate,
+        '-maxrate', options.bitrate,
+        '-bufsize', `${parseInt(options.bitrate) * 2}M`,
+        '-r', options.fps.toString(),
+        '-vf', `scale=${options.resolution.width}:${options.resolution.height}`,
+        '-c:a', 'aac',
+        '-b:a', '320k',
+        '-ar', '48000',
+        '-movflags', '+faststart',
+        'output.mp4'
+      ];
+      
+      // Execute FFmpeg command
+      await ff.exec(command);
+      
+      // Read and return the processed video
+      const data = await ff.readFile('output.mp4');
+      return new Blob([data], { type: 'video/mp4' });
+      
+    } catch (error) {
+      console.error('Error processing video:', error);
+      throw error;
     }
   }
 
-  clearEffects(): void {
-    this.effects = [];
-  }
-
-  // Effect application methods
-  private applyEffects(): void {
-    this.effects.forEach(effect => {
-      switch (effect.type) {
-        case 'blur':
-          this.applyBlur(effect.value);
-          break;
-        case 'brightness':
-          this.applyBrightness(effect.value);
-          break;
-        case 'contrast':
-          this.applyContrast(effect.value);
-          break;
-        case 'saturation':
-          this.applySaturation(effect.value);
-          break;
-        case 'hue':
-          this.applyHue(effect.value);
-          break;
-        case 'grayscale':
-          this.applyGrayscale(effect.value);
-          break;
-        case 'sepia':
-          this.applySepia(effect.value);
-          break;
-        case 'invert':
-          this.applyInvert(effect.value);
-          break;
-      }
-    });
-  }
-
-  private applyBlur(value: number): void {
-    this.ctx.filter = `blur(${value}px)`;
-  }
-
-  private applyBrightness(value: number): void {
-    this.ctx.filter = `brightness(${value}%)`;
-  }
-
-  private applyContrast(value: number): void {
-    this.ctx.filter = `contrast(${value}%)`;
-  }
-
-  private applySaturation(value: number): void {
-    this.ctx.filter = `saturate(${value}%)`;
-  }
-
-  private applyHue(value: number): void {
-    this.ctx.filter = `hue-rotate(${value}deg)`;
-  }
-
-  private applyGrayscale(value: number): void {
-    this.ctx.filter = `grayscale(${value}%)`;
-  }
-
-  private applySepia(value: number): void {
-    this.ctx.filter = `sepia(${value}%)`;
-  }
-
-  private applyInvert(value: number): void {
-    this.ctx.filter = `invert(${value}%)`;
-  }
-
-  // Video export methods
-  async exportToMP4(
-    inputStream: MediaStream,
-    options: VideoProcessingOptions = {}
+  async trimVideo(
+    videoBlob: Blob,
+    startTime: number,
+    endTime: number,
+    onProgress?: (progress: number) => void
   ): Promise<Blob> {
-    const {
-      fps = 30,
-      quality = 'high',
-      width = 1920,
-      height = 1080,
-      bitrate = 5000000,
-    } = options;
+    const ff = await this.init();
+    
+    await ff.writeFile('input.webm', await fetchFile(videoBlob));
+    const duration = endTime - startTime;
+    
+    await ff.exec([
+      '-ss', startTime.toString(),
+      '-i', 'input.webm',
+      '-t', duration.toString(),
+      '-c', 'copy',
+      'output.webm'
+    ]);
+    
+    const data = await ff.readFile('output.webm');
+    return new Blob([data], { type: 'video/webm' });
+  }
 
-    return new Promise((resolve, reject) => {
-      const mediaRecorder = new MediaRecorder(inputStream, {
-        mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: bitrate,
+  async applyBackground(
+    videoBlob: Blob,
+    background: string,
+    blur: number,
+    dim: number,
+    onProgress?: (progress: number) => void
+  ): Promise<Blob> {
+    const ff = await this.init();
+    
+    await ff.writeFile('input.webm', await fetchFile(videoBlob));
+    
+    if (background.startsWith('data:') || background.startsWith('http')) {
+      const bgResponse = await fetch(background);
+      const bgBlob = await bgResponse.blob();
+      await ff.writeFile('bg.jpg', await fetchFile(bgBlob));
+    }
+    
+    const filter = background.startsWith('data:') || background.startsWith('http')
+      ? `[1:v]scale=1920:1080,boxblur=${blur}[bg];[bg]brightness=${1 - dim/100}[bbg];[bbg][0:v]overlay=(W-w)/2:(H-h)/2`
+      : '[0:v]overlay=(W-w)/2:(H-h)/2';
+    
+    await ff.exec([
+      '-i', 'input.webm',
+      ...(background.startsWith('data:') || background.startsWith('http') ? ['-i', 'bg.jpg'] : []),
+      '-filter_complex', filter,
+      '-c:a', 'copy',
+      'output.webm'
+    ]);
+    
+    const data = await ff.readFile('output.webm');
+    return new Blob([data], { type: 'video/webm' });
+  }
+
+  async exportVideo(
+    videoBlob: Blob,
+    format: 'mp4' | 'gif',
+    resolution: '1080p' | '720p' | '480p',
+    quality: 'high' | 'medium' | 'low',
+    onProgress?: (progress: number) => void
+  ): Promise<Blob> {
+    const ff = await this.init();
+    
+    await ff.writeFile('input.webm', await fetchFile(videoBlob));
+    
+    const crf = quality === 'high' ? '18' : quality === 'medium' ? '23' : '28';
+    const scale = resolution === '1080p' ? '1920:1080' : resolution === '720p' ? '1280:720' : '854:480';
+    
+    if (format === 'mp4') {
+      await ff.exec([
+        '-i', 'input.webm',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', crf,
+        '-vf', `scale=${scale}`,
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        'output.mp4'
+      ]);
+      
+      const data = await ff.readFile('output.mp4');
+      return new Blob([data], { type: 'video/mp4' });
+    } else {
+      const fps = quality === 'high' ? '20' : quality === 'medium' ? '15' : '10';
+      const gifScale = resolution === '1080p' ? '480:-1' : resolution === '720p' ? '360:-1' : '240:-1';
+      
+      await ff.exec([
+        '-i', 'input.webm',
+        '-vf', `scale=${gifScale},fps=${fps},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`,
+        '-loop', '0',
+        'output.gif'
+      ]);
+      
+      const data = await ff.readFile('output.gif');
+      return new Blob([data], { type: 'image/gif' });
+    }
+  }
+
+  async applyZoomEffects(
+    videoBlob: Blob,
+    zoomRegions: Array<{
+      startTime: number;
+      endTime: number;
+      scale: number;
+    }>,
+    onProgress?: (progress: number) => void
+  ): Promise<Blob> {
+    const ff = await this.init();
+    
+    try {
+      // Write input file
+      await ff.writeFile('input.webm', await fetchFile(videoBlob));
+      
+      if (zoomRegions.length === 0) {
+        // If no zoom regions, return original video
+        const data = await ff.readFile('input.webm');
+        return new Blob([data], { type: 'video/webm' });
+      }
+
+      // Sort zoom regions by start time
+      const sortedRegions = [...zoomRegions].sort((a, b) => a.startTime - b.startTime);
+
+      // Create filter complex command for zoom effects
+      let filterComplex = '';
+      let currentInput = '[0:v]';
+      let currentOutput = '';
+      
+      sortedRegions.forEach((region, index) => {
+        const startTime = region.startTime.toFixed(2);
+        const endTime = region.endTime.toFixed(2);
+        const scale = region.scale;
+        
+        // Calculate zoom parameters
+        const zoomFactor = 1 / scale;
+        const offset = (1 - zoomFactor) / 2;
+        
+        currentOutput = `[v${index}]`;
+        
+        // Add zoom effect filter
+        filterComplex += `${currentInput}crop=iw*${zoomFactor}:ih*${zoomFactor}:iw*${offset}:ih*${offset},scale=${scale}*iw:${scale}*ih${currentOutput};`;
+        
+        currentInput = currentOutput;
       });
 
-      const chunks: BlobPart[] = [];
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
+      // Remove last semicolon
+      filterComplex = filterComplex.slice(0, -1);
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/mp4' });
-        resolve(blob);
-      };
+      // Execute FFmpeg command with zoom effects
+      await ff.exec([
+        '-i', 'input.webm',
+        '-filter_complex', filterComplex,
+        '-c:v', 'libvpx-vp9',
+        '-crf', '30',
+        '-b:v', '0',
+        '-c:a', 'copy',
+        'output.webm'
+      ]);
 
-      mediaRecorder.onerror = (error) => {
-        reject(error);
-      };
-
-      mediaRecorder.start();
-      setTimeout(() => mediaRecorder.stop(), 1000); // Record for 1 second
-    });
-  }
-
-  async exportToGIF(
-    inputStream: MediaStream,
-    options: VideoProcessingOptions = {}
-  ): Promise<Blob> {
-    const {
-      fps = 30,
-      quality = 'high',
-      width = 1920,
-      height = 1080,
-      loop = true,
-    } = options;
-
-    return new Promise((resolve, reject) => {
-      const frames: ImageData[] = [];
-      const videoElement = document.createElement('video');
-      videoElement.srcObject = inputStream;
-
-      videoElement.onloadedmetadata = () => {
-        videoElement.play();
-      };
-
-      videoElement.onplay = () => {
-        const captureFrame = () => {
-          if (frames.length < fps) {
-            this.ctx.drawImage(videoElement, 0, 0, width, height);
-            frames.push(this.ctx.getImageData(0, 0, width, height));
-            requestAnimationFrame(captureFrame);
-          } else {
-            const gif = this.createGIF(frames, fps, loop);
-            resolve(gif);
-          }
-        };
-
-        captureFrame();
-      };
-
-      videoElement.onerror = (error) => {
-        reject(error);
-      };
-    });
-  }
-
-  private createGIF(frames: ImageData[], fps: number, loop: boolean): Blob {
-    // Implementation would use a GIF encoding library
-    // For now, return an empty blob
-    return new Blob([], { type: 'image/gif' });
-  }
-
-  // Cleanup methods
-  stopProcessing(): void {
-    this.isProcessing = false;
-  }
-
-  cleanup(): void {
-    this.stopProcessing();
-    this.clearEffects();
-    this.canvas.width = 0;
-    this.canvas.height = 0;
+      // Read and return the processed video
+      const data = await ff.readFile('output.webm');
+      return new Blob([data], { type: 'video/webm' });
+    } catch (error) {
+      console.error('Error applying zoom effects:', error);
+      throw error;
+    }
   }
 }
 

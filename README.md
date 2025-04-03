@@ -1,109 +1,102 @@
-# Modern Screen Recording Tool
+# Screen Recording App
 
-A powerful, feature-rich screen recording application built with Electron and React. Record your screen with high-quality output, camera overlay, and various export options.
+A professional-grade screen recording app built with Electron and React, featuring high-quality video recording, editing, and exporting capabilities.
 
 ## Features
 
-- High-quality screen recording (1080p or above)
-- Smooth zoom functionality with keyboard shortcuts
-- Camera overlay with customizable position and size
-- Microphone audio recording
-- Aesthetic backgrounds and themes
-- Export to MP4 and GIF formats
-- Local storage only - no cloud dependencies
-- Preview before exporting
-- Modern, clean UI inspired by Loom/Focusee
+### Recording
+- Full-screen, custom area, or window recording
+- Camera integration with draggable webcam overlay
+- Microphone selection and audio recording
+- Multiple quality settings (Standard, High, Ultra)
 
-## Prerequisites
+### Editing
+- Timeline editing with trim functionality
+- Background customization (gradients, images, solid colors)
+- Blur and dim controls for backgrounds
+- Video playback with zoom controls
+- Placeholder for future AI-powered smart edits
 
-- Node.js (v14 or higher)
-- npm or yarn
-- FFmpeg (for video processing)
+### Exporting
+- Export to MP4 (H.264) with customizable quality
+- Export to GIF for shareable animations
+- Resolution options (1080p, 720p, 480p)
+- Quality presets (Low, Medium, High)
 
 ## Installation
 
-1. Clone the repository:
 ```bash
+# Clone the repository
 git clone https://github.com/yourusername/screen-recorder.git
 cd screen-recorder
-```
 
-2. Install dependencies:
-```bash
+# Install dependencies
 npm install
-# or
-yarn install
+
+# Development
+npm start          # Start React development server
+npm run electron:dev  # Start Electron in development mode
+
+# Build for production
+npm run build      # Build React app
+npm run electron:build  # Build Electron app for your platform
 ```
 
-3. Start the development server:
-```bash
-npm run dev
-# or
-yarn dev
-```
+## Usage Guide
 
-## Building for Production
-
-To create a production build:
-
-```bash
-npm run build
-# or
-yarn build
-```
-
-The built application will be available in the `dist` directory.
-
-## Usage
-
+### Recording
 1. Launch the application
-2. Select your recording preferences in the Settings page
-3. Click "Start Recording" to begin capturing your screen
-4. Use the zoom controls or keyboard shortcuts to adjust the view
-5. Toggle camera overlay if needed
-6. Click "Stop Recording" when finished
-7. Preview your recording
-8. Export in your preferred format (MP4 or GIF)
+2. Select recording mode (Full Screen, Custom, or Window)
+3. Choose your camera and microphone from the dropdown menus
+4. Select recording quality (Standard, High, Ultra)
+5. Click "Start Recording"
+6. Use the floating controls to pause or stop the recording
+7. Click "Stop" when finished
 
-## Keyboard Shortcuts
+### Editing
+After recording, you'll be taken to the editing screen where you can:
 
-- `Ctrl/Cmd + Z`: Zoom in
-- `Ctrl/Cmd + Shift + Z`: Zoom out
-- `Ctrl/Cmd + R`: Start/Stop recording
-- `Ctrl/Cmd + C`: Toggle camera overlay
-- `Space`: Play/Pause preview
-- `Esc`: Exit preview
+1. **Timeline Editing**:
+   - Use the slider handles to trim the start and end of your recording
+   - Click on the timeline to jump to a specific point
+   - Use zoom controls to zoom in/out of the timeline
+
+2. **Background Customization**:
+   - Select from various background types (Gradient, Landscape, Abstract, Solid)
+   - Adjust blur to apply a blur effect to the background
+   - Adjust dim to darken the background
+
+3. **Smart Edits** (Coming Soon):
+   - Auto Zoom
+   - Smart Cursor Tracking
+   - Noise Reduction
+   - Auto Captions
+
+### Exporting
+1. Click the "Export Video" button
+2. Choose your preferred format (MP4 or GIF)
+3. Select resolution (1080p, 720p, 480p)
+4. Select quality (High, Medium, Low)
+5. Click "Export Video" to process and download your file
 
 ## Development
 
-The project structure is organized as follows:
+This project uses:
+- Electron for the desktop application
+- React (Create React App) for the UI
+- FFmpeg.wasm for video processing
+- Material UI for components
+- TypeScript for type safety
 
-```
-src/
-├── components/         # React components
-│   ├── pages/         # Page components
-│   └── common/        # Shared components
-├── services/          # Business logic and services
-├── utils/            # Helper functions
-└── main.ts           # Electron main process
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+### Project Structure
+- `/src` - React application code
+- `/electron` - Electron main process code
+- `/public` - Static assets
 
 ## License
+MIT
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [Electron](https://www.electronjs.org/)
-- [React](https://reactjs.org/)
-- [Material-UI](https://mui.com/)
-- [FFmpeg](https://ffmpeg.org/)
-- [Whammy.js](https://github.com/antimatter15/whammy) 
+## Credits
+- FFmpeg.wasm for video processing
+- Material UI for components
+- Electron for desktop app capabilities 
